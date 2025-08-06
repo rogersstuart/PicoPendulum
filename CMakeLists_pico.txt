@@ -1,0 +1,47 @@
+cmake_minimum_required(VERSION 3.13)
+
+# Include Pico SDK
+include(pico_sdk_import.cmake)
+
+project(pendulum_control)
+
+# Initialize the SDK
+pico_sdk_init()
+
+# Add executable with all source files
+add_executable(pendulum_control
+    embedded/main.c
+    embedded/as5600.c
+    embedded/control.c
+    embedded/debug.c
+    embedded/drv8833.c
+    embedded/filters.c
+    embedded/motor_protection.c
+    embedded/pwm_simulation.c
+    embedded/virtual_encoder.c
+)
+
+# Include directories
+target_include_directories(pendulum_control PRIVATE embedded/)
+
+# Link Pico libraries
+target_link_libraries(pendulum_control 
+    pico_stdlib 
+    hardware_pwm 
+    hardware_i2c 
+    hardware_gpio
+    hardware_timer
+    hardware_watchdog
+)
+
+# Enable USB serial for debugging
+pico_enable_stdio_usb(pendulum_control 1)
+pico_enable_stdio_uart(pendulum_control 0)
+
+# Create map/bin/hex/uf2 files
+pico_add_extra_outputs(pendulum_control)
+
+# Add compile definitions for Pico build
+target_compile_definitions(pendulum_control PRIVATE
+    PLATFORM_PICO=1
+)
