@@ -10,10 +10,8 @@
 #include <QProgressBar>
 #include <cmath>
 
-// C headers must be included with C linkage to avoid name mangling.  We
-// forward declare in the header file and include here.
+// Additional C headers for motor protection
 extern "C" {
-#include "embedded/drv8833.h"
 #include "embedded/motor_protection.h"
 }
 

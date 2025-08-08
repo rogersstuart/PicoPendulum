@@ -7,12 +7,10 @@
 
 #include "PendulumWidget.h"
 #include "ControlPanel.h"
+#include "enhanced_physics_simulation.hpp"
 
-// Include C structures and APIs used by the simulation.  We include
-// these with C linkage to avoid name mangling problems.
+// Include additional C APIs used by the simulation
 extern "C" {
-#include "embedded/control.h"
-#include "embedded/drv8833.h"
 #include "embedded/motor_protection.h"
 #include "unified_virtual_encoder.h"
 #include "adaptive_mass/mass_integration.h"

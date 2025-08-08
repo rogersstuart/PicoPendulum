@@ -31,9 +31,11 @@ if(BUILD_QT_GUI)
         set(QT_LIBS Qt6::Widgets Qt6::OpenGL)
         set(QT_WRAP qt6_wrap_cpp)
     else()
-        find_package(Qt5 COMPONENTS Widgets OpenGL REQUIRED)
-        set(QT_LIBS Qt5::Widgets Qt5::OpenGL)
-        set(QT_WRAP qt5_wrap_cpp)
+        find_package(Qt5 COMPONENTS Widgets OpenGL Core QUIET)
+        if(Qt5_FOUND)
+            set(QT_LIBS Qt5::Widgets Qt5::OpenGL)
+            set(QT_WRAP qt5_wrap_cpp)
+        endif()
     endif()
 
     # List of header files requiring moc generation
@@ -42,7 +44,16 @@ if(BUILD_QT_GUI)
         qt_gui/MainWindow.h
         qt_gui/PendulumWidget.h
     )
-    ${QT_WRAP}(MOC_SRCS ${QT_MOC_HEADERS})
+    
+    # Generate MOC files based on Qt version
+    if(Qt6_FOUND)
+        qt6_wrap_cpp(MOC_SRCS ${QT_MOC_HEADERS})
+    elseif(Qt5_FOUND)
+        qt5_wrap_cpp(MOC_SRCS ${QT_MOC_HEADERS})
+    endif()
+
+    # Only proceed with Qt build if we found Qt
+    if(Qt6_FOUND OR Qt5_FOUND)
 
     # Sources for the Qt application.  We reuse simulation and control
     # modules from the embedded implementation to ensure consistent
@@ -54,6 +65,7 @@ if(BUILD_QT_GUI)
         qt_gui/MainWindow.cpp
         enhanced_physics_simulation.cpp
         unified_virtual_encoder.c
+        embedded/control.c
         embedded/motor_protection.c
         embedded/drv8833.c
         embedded/pwm_simulation.c
@@ -66,7 +78,7 @@ if(BUILD_QT_GUI)
     add_executable(${PROJECT_NAME}
         ${QT_APP_SOURCES}
     )
-    target_compile_definitions(${PROJECT_NAME} PRIVATE QT_GUI)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE QT_GUI PC_DEBUG)
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/qt_gui
@@ -76,4 +88,7 @@ if(BUILD_QT_GUI)
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE ${QT_LIBS} ${CMAKE_DL_LIBS})
     install(TARGETS ${PROJECT_NAME} DESTINATION bin)
+    else()
+        message(WARNING "Qt not found. GUI will not be built. Install Qt5 or Qt6 development packages to enable GUI.")
+    endif()
 endif()

@@ -24,7 +24,9 @@
 
 #include "adaptive_mass/mass_integration.h"
 #include "adaptive_mass/mass_friction_estimator.h"
+#include <math.h>
 #include "embedded/config.h"
+#include "embedded/control.h"
 
 /* Local mass & friction estimator instance.  Each build (PC or Pico)
  * maintains its own estimator.  This variable must not be exposed
@@ -57,38 +59,58 @@ void adaptive_mass_reset(void) {
     mass_friction_estimator_reset(&g_shared_est);
 }
 
-void adaptive_mass_update(ctrl_params_t *p, ctrl_state_t *s, float u) {
-    if (!p || !s) return;
+void adaptive_mass_update(ctrl_params_t *params, ctrl_state_t *state, float u) {
+    if (!params || !state) return;
     /* Lazy initialisation in case init() was not called. */
     if (!g_shared_est.initialized) {
-        mass_friction_estimator_init(&g_shared_est, p->m, p->b_vis);
+        mass_friction_estimator_init(&g_shared_est, params->m, params->b_vis);
     }
     /* Clamp command to [-1,1] and convert to applied torque. */
     float cmd = local_clamp(u, -1.0f, 1.0f);
-    float applied_tau = p->u_to_tau * cmd;
+    float applied_tau = params->u_to_tau * cmd;
+
+    // Additional logic to prevent updates during balance mode
+    // The estimators should only run during swing-up when we have good excitation
+    if (state->state == ST_BALANCE || state->state == ST_IDLE) {
+        // Don't update estimators during balance or idle
+        return;
+    }
+    
+    // Also skip if we're transitioning to balance (near capture)
+    if (fabsf(state->theta_u) < 0.6f && fabsf(state->omega) < 5.0f) {
+        // About to capture - stop updating to prevent drift
+        return;
+    }
+    
+    // Compute the applied torque from control output
+    float tau = u * params->u_to_tau;
+    
+    // Only update estimators when we have good conditions
+    // This is now handled inside the estimator functions themselves
+
     /* Perform RLS update. */
     float new_mass = mass_friction_estimator_update(&g_shared_est,
                                                    applied_tau,
-                                                   s->theta_u,
-                                                   s->omega,
-                                                   p->dt,
-                                                   p->L,
-                                                   p->Jm,
-                                                   p->tau_ff);
+                                                   state->theta_u,
+                                                   state->omega,
+                                                   params->dt,
+                                                   params->L,
+                                                   params->Jm,
+                                                   params->tau_ff);
     /* Update the control parameters with the new estimates. */
-    p->m = new_mass;
+    params->m = new_mass;
     /* Also update viscous friction in the control parameters.  This
      * allows the controller to adapt its feedback gains or models if
      * friction drifts over time.  Friction is always non‑negative. */
     float new_fric = mass_friction_estimator_get_friction(&g_shared_est);
-    p->b_vis = new_fric;
+    params->b_vis = new_fric;
     /* Update the energy target for the new mass. */
-    s->Edes = CALCULATE_ENERGY_TARGET(new_mass, p->L);
+    state->Edes = CALCULATE_ENERGY_TARGET(new_mass, params->L);
     /* If tampering has been detected force the fault state and zero the
      * command.  This protects the hardware and signals the user.
      */
     if (mass_friction_estimator_is_tampered(&g_shared_est)) {
-        s->state = ST_FAULT;
-        s->u = 0.0f;
+        state->state = ST_FAULT;
+        state->u = 0.0f;
     }
 }

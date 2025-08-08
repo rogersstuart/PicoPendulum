@@ -77,10 +77,10 @@ void mass_friction_estimator_init(mass_friction_estimator_t *est,
                                    float initial_friction) {
     if (!est) return;
     /* Use conservative defaults if the provided initial guesses are
-     * invalid.  Starting near the midpoints of the allowed ranges
-     * avoids division by very small values during early updates. */
+     * invalid.  Starting with maximum mass provides more aggressive
+     * control initially, then adapts down as needed. */
     if (initial_mass <= 0.0f) {
-        initial_mass = 0.5f * (MF_EST_MIN_MASS + MF_EST_MAX_MASS);
+        initial_mass = MF_EST_MAX_MASS;
     }
     if (initial_friction < 0.0f) {
         initial_friction = 0.5f * (MF_EST_MIN_FRICT + MF_EST_MAX_FRICT);
@@ -116,15 +116,50 @@ void mass_friction_estimator_reset(mass_friction_estimator_t *est) {
 }
 
 float mass_friction_estimator_update(mass_friction_estimator_t *est,
-                                     float tau,
-                                     float theta,
-                                     float omega,
-                                     float dt,
-                                     float length,
-                                     float Jm,
-                                     float tau_ff) {
-    if (!est) return 0.0f;
-    /* Initialise if reset. */
+                                      float tau,
+                                      float theta,
+                                      float omega,
+                                      float dt,
+                                      float length,
+                                      float Jm,
+                                      float tau_ff) {
+    
+    // Skip updates near the upright position where the model is poor
+    if (fabsf(theta) < 0.3f) {  // Within ~17 degrees of upright
+        // Don't update near the top - linearization fails here
+        return est->theta[0];
+    }
+    
+    // Skip updates when motor torque is insignificant
+    if (fabsf(tau) < 0.005f) {  // Less than 5mNm
+        return est->theta[0];
+    }
+    
+    // CHANGED: Focus estimation on high-torque regions near bottom
+    // The pendulum model is most accurate when:
+    // 1. We're away from singularities (not at top)
+    // 2. Motor is applying significant torque
+    // 3. Velocity is moderate (not stalled, not too fast)
+    
+    // Check if we're in a good region for estimation
+    bool near_bottom = fabsf(fabsf(theta) - M_PI) < 1.2f;  // Within ~70 degrees of bottom
+    bool good_torque = fabsf(tau) > 0.015f;  // At least 15mNm for friction estimation
+    bool good_velocity = fabsf(omega) > 0.3f && fabsf(omega) < 8.0f;
+    
+    // Additional check: motor should be actively driving (not just braking)
+    bool motor_driving = (tau * omega > 0);  // Same sign = adding energy
+    
+    if (!near_bottom || !good_torque || !good_velocity) {
+        // Not ideal conditions for joint mass/friction estimation
+        return est->theta[0];
+    }
+    
+    // For friction estimation, we particularly want phases where motor is driving
+    // against friction (not coasting)
+    if (!motor_driving && fabsf(tau) < 0.02f) {
+        // Coasting or light braking - poor for friction estimation
+        return est->theta[0];
+    }
     if (!est->initialized) {
         mass_friction_estimator_init(est, est->theta[0] > 0.0f ? est->theta[0] : 0.1f,
                                      est->theta[1] >= 0.0f ? est->theta[1] : 0.01f);

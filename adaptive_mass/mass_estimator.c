@@ -81,13 +81,12 @@ static inline float fsign(float x) {
 
 void mass_estimator_init(mass_estimator_t *est, float initial_mass) {
     if (!est) return;
-    /* If the provided initial mass is not sensible use the midpoint of
-     * the allowable range as a conservative starting point.  This
-     * prevents division by near-zero values during the first few
-     * updates and helps the estimator converge more quickly.
+    /* If the provided initial mass is not sensible use the maximum
+     * allowable mass as a starting point. This provides more aggressive
+     * control initially, then adapts down as needed.
      */
     if (initial_mass <= 0.0f) {
-        initial_mass = 0.5f * (MASS_ESTIMATOR_MIN_MASS + MASS_ESTIMATOR_MAX_MASS);
+        initial_mass = MASS_ESTIMATOR_MAX_MASS;
     }
     est->m_est = initial_mass;
     est->P = MASS_ESTIMATOR_DEFAULT_P;
@@ -121,8 +120,40 @@ float mass_estimator_update(mass_estimator_t *est,
                             float Jm,
                             float b_vis,
                             float tau_ff) {
-    if (!est) {
-        return 0.0f;
+    
+    // Skip updates near the upright position where linearization is poor
+    // The estimator works best when the pendulum is far from vertical
+    if (fabsf(theta) < 0.3f) {  // Within ~17 degrees of upright
+        // Don't update near the top - model is inaccurate here
+        return est->m_hat;
+    }
+    
+    // Skip updates when motor torque is too small to provide good signal
+    // We need significant motor input for accurate estimation
+    if (fabsf(tau) < 0.005f) {  // Less than 5mNm - too small
+        return est->m_hat;
+    }
+    
+    // CHANGED: Update primarily during high-torque phases of swing-up
+    // Best estimation occurs when motor is actively driving the pendulum
+    // This is typically when the pendulum is moving through the bottom region
+    bool near_bottom = fabsf(fabsf(theta) - M_PI) < 1.0f;  // Within ~60 degrees of bottom
+    bool significant_torque = fabsf(tau) > 0.01f;  // At least 10mNm
+    bool moderate_velocity = fabsf(omega) > 0.5f && fabsf(omega) < 6.0f;  // Moving but not too fast
+    
+    // Only update when we have good conditions for estimation
+    if (!near_bottom || !significant_torque || !moderate_velocity) {
+        // Conditions not ideal for estimation
+        return est->m_hat;
+    }
+    
+    // Also skip if angular acceleration is too high (nonlinear effects dominate)
+    float alpha = (tau - b_vis * omega - tau_ff * ctl_sgn(omega) + 
+                   est->m_hat * GRAVITY_ACCEL * (length / 2.0f) * sinf(theta)) / 
+                  (est->m_hat * length * length / 3.0f + Jm);
+    
+    if (fabsf(alpha) > 50.0f) {  // Acceleration too high - likely nonlinear
+        return est->m_hat;
     }
     /* Lazy initialise if the estimator was reset. */
     if (!est->initialized) {
@@ -134,7 +165,7 @@ float mass_estimator_update(mass_estimator_t *est,
         return est->m_est;
     }
     /* Compute angular acceleration using backward difference. */
-    float alpha = (omega - est->prev_omega) / dt;
+    alpha = (omega - est->prev_omega) / dt;
     est->prev_omega = omega;
 
     /* Skip estimator update when motion is too aggressive.  During

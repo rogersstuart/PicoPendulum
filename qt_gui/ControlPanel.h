@@ -9,11 +9,11 @@
 #include <QCheckBox>
 #include <QTimer>
 
-// Forward declarations of control structures from the C code.  We include
-// these via extern "C" in the implementation file to avoid name mangling.
-struct ctrl_state_t;
-struct ctrl_params_t;
-struct drv8833_t;
+// Include control structures directly instead of forward declarations
+extern "C" {
+#include "embedded/control.h"
+#include "embedded/drv8833.h"
+}
 
 /**
  * @brief Simple control panel for the pendulum simulator.

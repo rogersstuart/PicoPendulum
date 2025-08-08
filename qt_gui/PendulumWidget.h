@@ -4,11 +4,11 @@
 #include <QOpenGLWidget>
 #include <QOpenGLFunctions>
 
-// Forward declarations of control structures used for display
-struct ctrl_state_t;
-struct ctrl_params_t;
-
-class EnhancedPendulumPhysics;
+// Include control structures directly instead of forward declarations
+extern "C" {
+#include "embedded/control.h"
+}
+#include "enhanced_physics_simulation.hpp"
 
 /**
  * @brief OpenGL widget for rendering the pendulum.

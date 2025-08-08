@@ -5,6 +5,16 @@
 
 #include <cmath>
 
+// Ensure control constants are visible
+extern "C" {
+#include "embedded/control.h"
+}
+
+// Define state constants if not visible from C header
+#ifndef ST_IDLE
+enum ctrl_states { ST_IDLE=0, ST_CALIB, ST_SWINGUP, ST_CATCH, ST_BALANCE, ST_FAULT };
+#endif
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
       m_pendulumWidget(nullptr), m_controlPanel(nullptr),
@@ -97,15 +107,22 @@ void MainWindow::initControlSystem()
 
     // Initialise motor driver simulation (pins arbitrary for PC build)
     drv8833_init(&m_motorDriver, 14, 15, 1000.0f);
-    // Initialise unified virtual encoder at zero angle
-    ve_init_global(0.0f);
+    
+    // Initialize all systems to consistent hanging-down position (π radians from upright)
+    const float initial_theta_u = static_cast<float>(M_PI); // Hanging down
+    
+    // Initialize physics system to hanging down position
+    m_physics.reset(initial_theta_u, 0.0f);
+    
+    // Initialize virtual encoder to match the physics initial position
+    ve_init_global(initial_theta_u);
     // Initialise adaptive mass estimator
     adaptive_mass_init(&m_ctrlParams);
 
-    // Reset controller state variables
-    m_ctrlState.theta_u = static_cast<float>(M_PI); // Start hanging downward
+    // Reset controller state variables to match the initial physics state
+    m_ctrlState.theta_u = initial_theta_u; // Start hanging downward
     m_ctrlState.omega   = 0.0f;
-    m_ctrlState.state   = ST_IDLE;
+    m_ctrlState.state   = (decltype(m_ctrlState.state))ST_IDLE;
     m_ctrlState.ui      = 0.0f;
     m_ctrlState.E       = 0.0f;
     m_simTime = 0.0f;
@@ -131,8 +148,11 @@ void MainWindow::stepSimulation(float realDt)
         // Update virtual encoder with current velocity and time step
         ve_set_velocity_global(m_ctrlState.omega);
         ve_update_global(dt);
-        // Compute upright referenced angle via encoder
-        m_ctrlState.theta_u = ve_wrap_to_pi(ve_angle_global());
+        
+        // For debugging: use physics angle directly instead of virtual encoder
+        // to eliminate encoder drift issues
+        m_ctrlState.theta_u = m_physics.getTheta();
+        
         // Maintain bottom referenced angle for completeness
         m_ctrlState.theta_b = m_physics.getThetaBottom();
 
@@ -140,6 +160,19 @@ void MainWindow::stepSimulation(float realDt)
         // the mass integration layer in ctrl_step().  It returns the
         // motor command in the range [-1,1].
         float u = ctrl_step(&m_ctrlParams, &m_ctrlState);
+        
+        // Safety limiter: prevent runaway control
+        if (fabsf(u) > 1.0f) {
+            printf("WARNING: Control output saturated: u=%.3f\n", u);
+            u = (u > 0) ? 1.0f : -1.0f;
+        }
+        
+        // Debug output for swing-up troubleshooting
+        if (m_ctrlState.state == ST_SWINGUP && static_cast<int>(m_simTime * 1000) % 100 == 0) {
+            printf("SwingUp: theta_u=%.3f, omega=%.3f, E=%.3f, Edes=%.3f, u=%.3f\n", 
+                   m_ctrlState.theta_u, m_ctrlState.omega, m_ctrlState.E, m_ctrlState.Edes, u);
+        }
+        
         // Apply command through motor driver simulation
         drv8833_cmd(&m_motorDriver, u);
         drv8833_step_simulation(&m_motorDriver, dt, m_physics.getOmega());
@@ -193,7 +226,7 @@ void MainWindow::onResetRequested()
 void MainWindow::onStartSwingRequested()
 {
     // Switch controller to swing‑up mode
-    m_ctrlState.state = ST_SWINGUP;
+    m_ctrlState.state = (decltype(m_ctrlState.state))ST_SWINGUP;
     m_ctrlState.ui    = 0.0f;
     // Recompute energy target for the current mass estimate
     m_ctrlState.Edes = CALCULATE_ENERGY_TARGET(m_ctrlParams.m, m_ctrlParams.L);

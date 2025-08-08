@@ -2,12 +2,19 @@
 #define DEBUG_H
 
 #include <stdbool.h>
+
+#ifdef PICO_BUILD
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
 #include "hardware/uart.h"
 #include "hardware/irq.h"
 #include "pico/stdio.h"
 #include "pico/stdio/driver.h"
+#else
+// PC/Qt build - provide minimal definitions
+#include <stdio.h>
+#include <stdint.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,6 +72,7 @@ typedef enum {
     LED_TRIPLE_BLINK,  // I2C Error (3 blinks then pause)
 } led_pattern_t;
 
+#ifdef PICO_BUILD
 // Initialize debug interface with interrupt support
 void debug_init(void);
 
@@ -122,6 +130,15 @@ void debug_recalibrate_down(void);
 
 // Scan I2C bus for devices, particularly looking for AS5600 at 0x36
 void debug_scan_i2c(i2c_inst_t *i2c);
+#else
+// PC/Qt build - provide stub functions
+static inline void debug_init(void) {}
+static inline void debug_process(void) {}
+static inline bool debug_has_motor_control(float* motor_value) { (void)motor_value; return false; }
+static inline bool debug_is_output_enabled(void) { return false; }
+static inline bool debug_is_quiet_mode(void) { return true; }
+static inline void debug_print(const char* fmt, ...) { (void)fmt; }
+#endif
 
 #ifdef __cplusplus
 }

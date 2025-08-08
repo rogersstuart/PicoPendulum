@@ -65,18 +65,23 @@ void PendulumWidget::paintGL()
     // Map physical length to pixel length.  We scale by the minimum of
     // the width and height to preserve aspect ratio.
     float rod_px = 0.45f * std::min(w, h);
-    // Convert angle from upright reference (theta_u) to bottom reference
+    
+    // Get angle from physics (upright = 0, hanging down = PI)
     float theta_u = m_state->theta_u;
-    float theta_b = static_cast<float>(M_PI) + theta_u;
-    // Compute the end point of the rod
-    float ex = cx + rod_px * std::sin(theta_b);
-    float ey = cy + rod_px * std::cos(theta_b);
+    
+    // Calculate pendulum bob position
+    // Screen coordinates: positive Y is down, positive X is right
+    // theta_u = 0 means upright (pendulum pointing up, bob should be above pivot)
+    // theta_u = π means hanging down (pendulum pointing down, bob should be below pivot)
+    // We need to flip the Y component to match screen coordinates
+    float bobX = cx + rod_px * sinf(theta_u);
+    float bobY = cy - rod_px * cosf(theta_u);  // Note the minus sign!
 
     // Draw the rod
     QPen rodPen(QColor(200, 200, 200));
     rodPen.setWidthF(4.0f);
     painter.setPen(rodPen);
-    painter.drawLine(QPointF(cx, cy), QPointF(ex, ey));
+    painter.drawLine(QPointF(cx, cy), QPointF(bobX, bobY));
 
     // Draw the pivot as a small disc
     painter.setBrush(QColor(80, 80, 80));
@@ -86,7 +91,7 @@ void PendulumWidget::paintGL()
     // Draw the bob at the end of the rod
     painter.setBrush(QColor(150, 150, 250));
     float bob_radius = 10.0f;
-    painter.drawEllipse(QPointF(ex, ey), bob_radius, bob_radius);
+    painter.drawEllipse(QPointF(bobX, bobY), bob_radius, bob_radius);
 
     // Draw a motor command indicator at the pivot.  Use a small arrow whose
     // length and colour reflect the current command.  Positive commands

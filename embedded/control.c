@@ -10,9 +10,11 @@
 #include "unified_virtual_encoder.h"
 #include "common/energy_control.h"
 #include "common/control_utils.h"
+#ifdef PICO_BUILD
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/pwm.h"
+#endif
 
 // Ensure M_PI is defined
 #ifndef M_PI
@@ -22,11 +24,17 @@
 // External access to motor driver for PWM frequency control and protection status
 extern drv8833_t drv;
 
+#ifdef PICO_BUILD
 // External motor inversion flag
 extern bool MOTOR_INVERT;
 
 // External sensor inversion flag  
 extern bool SENSOR_INVERT;
+#else
+// PC build stubs
+static bool MOTOR_INVERT = false;
+static bool SENSOR_INVERT = false;
+#endif
 
 // ---------------------------------------------------------------------------
 // Local VirtualEncoder instance
@@ -114,131 +122,145 @@ static float legacy_energy_control(const ctrl_params_t *p, ctrl_state_t *s) {
     return 0.0f;
 }
 
-float ctrl_update(ctrl_params_t *p, ctrl_state_t *s) {
-    // Wrap theta_u to ensure proper control calculations
-    s->theta_u = ctl_wrap_pi(s->theta_u);
-    
-    // Simple upright detection (matches PC version exactly)
-    bool is_upright = (fabsf(s->theta_u) < p->theta_catch) && (fabsf(s->omega) < p->omega_catch);
+// Add this near the top of the file to track state transition
+static unsigned int balance_mode_start_time = 0;
+static bool balance_mode_initialized = false;
 
-    // State transitions (simplified like PC version)
-    if (s->state == ST_BALANCE && !is_upright) {
-        s->state = ST_SWINGUP; // BALANCE -> SWINGUP
-        if (debug_is_output_enabled()) {
-            printf("BALANCE->SWINGUP: Lost balance\n");
+float ctrl_update(ctrl_params_t *params, ctrl_state_t *state) {
+    float u = 0.0f;
+    
+    // Handle state transition with hysteresis to prevent oscillating
+    if (state->state == ST_SWINGUP) {
+        // Check if we're close to upright BEFORE applying control
+        // This prevents adaptive braking from interfering with capture
+        if (fabsf(state->theta_u) < 0.5f && fabsf(state->omega) < 4.0f) {
+            // Transition to balance mode immediately
+            state->state = ST_BALANCE;
+            balance_mode_start_time = 0;
+            balance_mode_initialized = true;
+            state->ui = 0.0f;
+            
+            // Reset adaptive brake to prevent interference
+            state->adaptive_brake_duty = 0.0f;
+            
+            printf("CAPTURED: theta_u=%f, omega=%f, switching to balance mode\n", 
+                   state->theta_u, state->omega);
+            
+            // Apply initial balance control right away
+            u = -4.0f * state->theta_u - 0.8f * state->omega;
+            u = ctl_clampf(u, -0.3f, 0.3f);
+        } else {
+            // Only apply energy control when not near upright
+            // Disable adaptive braking when approaching upright
+            if (fabsf(state->theta_u) < 0.8f) {
+                // Near upright - use simple energy control without braking
+                float E_error = state->E - state->Edes;
+                // Simple proportional control on energy
+                u = -0.5f * E_error * ctl_sgn(state->omega * cosf(state->theta_u));
+                u = ctl_clampf(u, -0.3f, 0.3f);
+                
+                // Reset adaptive brake duty to prevent interference
+                state->adaptive_brake_duty = 0.0f;
+            } else {
+                // Far from upright - use full energy control with adaptive features
+                u = energy_control(params, state);
+                u = ctl_clampf(u, -params->swing_sat, params->swing_sat);
+            }
         }
     }
-
-    float u = 0.0f;
-    switch (s->state) {
-        case ST_IDLE: // IDLE
-            // Don't auto-start swing-up, wait for user command
-            break;
+    
+    // Handle balance mode with a stabilization period
+    else if (state->state == ST_BALANCE) {
+        // Count time in balance mode
+        balance_mode_start_time++;
+        
+        // Apply control based on state
+        if (balance_mode_start_time < 300) {  // Reduced stabilization period
+            // Initial stabilization with moderate gains
+            float angle_gain = 4.0f;    // Back to original
+            float velocity_gain = 0.8f;  // Back to original
             
-        case ST_SWINGUP: // SWINGUP
-            /* Use the common energy control module for swing‑up. */
-            u = energy_control(p, s);
+            // Apply stabilizing control based on angle and angular velocity
+            u = -angle_gain * state->theta_u - velocity_gain * state->omega;
             
-            // ENHANCED TRANSITION: Use VirtualEncoder for predictive upright detection
-            if (is_upright) {
-                // Additional check: predict if we'll still be upright in the next control cycle
-                float predicted_angle = ve_predict(&ve, p->dt);
-                float predicted_theta_u = ve_wrap_to_pi(predicted_angle);
-                bool will_stay_upright = (fabsf(predicted_theta_u) < p->theta_catch * 1.2f); // 20% margin
-                
-                if (will_stay_upright) {
-                    s->state = ST_BALANCE; 
-                    ctrl_reset_integrator(s);
-                    if (debug_is_output_enabled()) {
-                        printf("SWINGUP->BALANCE: Reached upright (predicted stable)\n");
-                    }
-                } else if (debug_is_output_enabled()) {
-                    printf("SWINGUP: Near upright but trajectory unstable, continuing...\n");
-                }
-            }
-            break;
+            // Limit control output
+            u = ctl_clampf(u, -0.5f, 0.5f);
             
-        case ST_BALANCE: // BALANCE
-            if (!is_upright) { 
-                s->state = ST_SWINGUP; 
-                break; 
-            }
-            // Apply additional filtering during balance mode to improve precision.
-            // A low‑pass filter smooths the Kalman output further when balancing.
-            static float theta_extra_filtered = 0.0f;
-            static float omega_extra_filtered = 0.0f;
-            static bool extra_filter_initialized = false;
-            
-            if (!extra_filter_initialized) {
-                theta_extra_filtered = s->theta_u_filtered;
-                omega_extra_filtered = s->omega_filtered;
-                extra_filter_initialized = true;
+            // Add debug output during initial stabilization
+            if (balance_mode_start_time % 50 == 0) {
+                printf("STABILIZING: t=%d, theta_u=%f, omega=%f, u=%f\n",
+                      balance_mode_start_time, state->theta_u, state->omega, u);
             }
             
-            // Balance‑only additional low‑pass filtering.  A higher alpha provides more smoothing to reduce noise.
-            const float extra_filter_alpha = 0.75f;
-            theta_extra_filtered = extra_filter_alpha * theta_extra_filtered + (1.0f - extra_filter_alpha) * s->theta_u_filtered;
-            omega_extra_filtered = extra_filter_alpha * omega_extra_filtered + (1.0f - extra_filter_alpha) * s->omega_filtered;
-            
-            // Use the double-filtered values for control calculations
-            float theta_u_wrapped = ctl_wrap_pi(theta_extra_filtered);
-            
-            // Scale the gains based on the angular distance from upright.
-            float distance_factor = 1.0f + 2.0f * fabsf(theta_u_wrapped) / (M_PI/6.0f); // Scale up to 3x for large angles
-            distance_factor = ctl_clampf(distance_factor, 1.0f, 3.0f);
-            
-            // Compute aggressive PID gains for balance.  Higher scaling factors help stabilise
-            // the upright position across large angles.
-            float Kp_aggressive = p->Kp * distance_factor * 5.0f;  // Scaled proportional gain
-            float Kd_aggressive = p->Kd * distance_factor * 3.0f;  // Scaled derivative gain  
-            float Ki_aggressive = p->Ki * distance_factor * 6.0f;  // Scaled integral gain
-            
-            // Minimum command threshold to overcome static friction.
-            float min_force_threshold = 0.25f;
-            
-            // Calculate PID terms with negative feedback for stable control using DOUBLE-FILTERED values
-            float proportional = -Kp_aggressive * theta_u_wrapped;
-            float derivative = -Kd_aggressive * omega_extra_filtered;  // Use double-filtered velocity for maximum stability
-            float integral_term = Ki_aggressive * theta_u_wrapped;
-            
-            // Allow the integral term to build up sufficiently to overcome static friction.
-            s->ui += integral_term;
-            float max_integral = 5.0f * distance_factor; // Allow massive integral buildup
-            s->ui = ctl_clampf(s->ui, -max_integral, max_integral);
-            
-            // Combine PID terms
-            u = proportional + derivative + s->ui;
-            
-            // Add feed‑forward gravity compensation.
-            float gravity_compensation = (p->m * 9.81f * p->L * 0.5f * sinf(theta_u_wrapped)) / p->u_to_tau;
-            u += gravity_compensation;
-            
-            // Deadband threshold to suppress tiny commands that can cause vibration.
-            const float vibration_deadband = 0.02f;
-            if (fabsf(u) < vibration_deadband) {
-                u = 0.0f; // Zero out tiny commands that just cause vibration
+            // Only fall back to swing-up if we're really far from upright
+            if (fabsf(state->theta_u) > 1.5f) {
+                printf("BALANCE FAILED: falling back to swing-up\n");
+                state->state = ST_SWINGUP;
+                balance_mode_initialized = false;
+                state->ui = 0.0f;
+                // Reset adaptive parameters
+                state->adaptive_brake_duty = 0.0f;
+                state->apex_detected_this_cycle = false;
             }
             
-            // If the command is above the deadband but below the threshold, boost it to overcome static friction.
-            if (fabsf(u) > vibration_deadband && fabsf(u) < min_force_threshold) {
-                float friction_boost = min_force_threshold * ctl_sgn(u);
-                u = friction_boost;
-            }
-            
-            // Apply command smoothing to reduce PWM noise in balance mode.
-            static float u_filtered = 0.0f;
-            static bool u_filter_initialized = false;
-            if (!u_filter_initialized) {
-                u_filtered = u;
-                u_filter_initialized = true;
-            }
-            // Use a moderate smoothing factor to balance responsiveness and noise suppression.
-            const float cmd_filter_alpha = 0.85f;
-            u_filtered = cmd_filter_alpha * u_filtered + (1.0f - cmd_filter_alpha) * u;
-            u = u_filtered;
-            
-            u = ctl_clampf(u, -p->balance_sat, p->balance_sat);
-            break;
+            state->u = u;
+            return u;
+        }
+        
+        // After stabilization period, use normal balance controller
+        float theta_u_wrapped = ctl_wrap_pi(state->theta_u);
+        
+        // Standard gains
+        float Kp_balance = 4.0f;
+        float Kd_balance = 0.8f;
+        float Ki_balance = 0.01f;
+        
+        // Calculate PID terms with negative feedback for stable control
+        float proportional = -Kp_balance * theta_u_wrapped;
+        float derivative = -Kd_balance * state->omega;
+        
+        // Update integrator with anti-windup
+        if (fabsf(theta_u_wrapped) < 0.05f) {
+            float integral_term = Ki_balance * theta_u_wrapped;
+            state->ui += integral_term * params->dt;
+            float ui_limit = 0.1f;
+            state->ui = ctl_clampf(state->ui, -ui_limit, ui_limit);
+        } else {
+            state->ui *= 0.98f;
+        }
+        
+        // Combine PID terms
+        u = proportional + derivative + state->ui;
+        
+        // Add gravity compensation
+        float gravity_compensation = -0.3f * sinf(theta_u_wrapped);
+        u += gravity_compensation;
+        
+        // Simple first-order filter
+        static float u_prev = 0.0f;
+        u = 0.7f * u + 0.3f * u_prev;
+        u_prev = u;
+        
+        // Apply saturation
+        u = ctl_clampf(u, -params->balance_sat, params->balance_sat);
+        
+        // If we're losing control, fall back to swing-up
+        if (fabsf(theta_u_wrapped) > 1.0f) {
+            printf("BALANCE LOST: theta=%f, falling back to swing-up\n", theta_u_wrapped);
+            state->state = ST_SWINGUP;
+            balance_mode_initialized = false;
+            state->ui = 0.0f;
+            u_prev = 0.0f;
+            // Reset adaptive parameters
+            state->adaptive_brake_duty = 0.0f;
+            state->apex_detected_this_cycle = false;
+        }
+        
+        // Debug output
+        if (balance_mode_start_time % 100 == 1) {
+            printf("BALANCE: t=%d, theta=%f, omega=%f, u=%f, ui=%f\n", 
+                   balance_mode_start_time, theta_u_wrapped, state->omega, u, state->ui);
+        }
     }
     
     // Apply saturation
@@ -249,7 +271,7 @@ float ctrl_update(ctrl_params_t *p, ctrl_state_t *s) {
         u = -u;
     }
     
-    s->u = u;
+    state->u = u;
     return u;
 }
 

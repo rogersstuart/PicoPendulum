@@ -23,6 +23,44 @@
  * factors it out into a common module.  See control.c for
  * documentation on the algorithm. */
 float energy_control(const ctrl_params_t *p, ctrl_state_t *s) {
+    float u = 0.0f;
+    
+    // Special case: detect if pendulum is stuck near the bottom point
+    // This happens when theta_u is close to ±π radians
+    if (fabsf(fabsf(s->theta_u) - M_PI) < 0.8f && fabsf(s->omega) < 0.5f) {
+        // We're near the bottom with low velocity - likely stuck
+        
+        // Count how long we've been stuck
+        static int stuck_counter = 0;
+        stuck_counter++;
+        
+        // After a short delay to confirm we're stuck
+        if (stuck_counter > 20) {
+            // Apply a strong push in a consistent direction to escape
+            // Choose direction based on which side of bottom we're on
+            float escape_direction = (s->theta_u > 0) ? 1.0f : -1.0f;
+            
+            // Reset counter if we've moved significantly
+            if (fabsf(s->omega) > 2.0f) {
+                stuck_counter = 0;
+                printf("ESCAPED local minimum, resuming normal control\n");
+            } else {
+                // Print diagnostic once when we detect stuck condition
+                if (stuck_counter == 21) {
+                    printf("STUCK at bottom: theta_u=%f, omega=%f, applying escape push\n", 
+                           s->theta_u, s->omega);
+                }
+                
+                // Return strong push in escape direction
+                return 0.8f * escape_direction;
+            }
+        }
+    } else {
+        // We're not stuck at the bottom, reset counter
+        static int stuck_counter = 0;
+        stuck_counter = 0;
+    }
+    
     // Convert upright‑referenced angle to bottom‑referenced angle.
     float theta_b = ctl_wrap_pi(s->theta_u + (float)M_PI);
 
@@ -67,8 +105,13 @@ float energy_control(const ctrl_params_t *p, ctrl_state_t *s) {
             s->kick_active = true;
             u_energy = BREAKAWAY_DUTY * (float)s->kick_direction;
         } else {
-            // Pendulum swinging: pump energy in direction of motion.
-            float direction = ctl_sgn(s->omega);
+            // Pendulum swinging: pump energy using correct pendulum dynamics.
+            // Apply torque in direction that increases energy:
+            // - When moving away from bottom: torque in direction of motion
+            // - When moving toward bottom: torque opposite to motion
+            // This is achieved by: direction = sgn(omega * sin(theta_u))
+            float sin_theta_u = sinf(s->theta_u);
+            float direction = ctl_sgn(s->omega * sin_theta_u);
             u_energy = s->drive_level * direction;
             // Peak tracking to adapt drive level.
             static float prev_peak = 0.0f;
