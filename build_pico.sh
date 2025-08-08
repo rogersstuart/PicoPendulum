@@ -127,7 +127,7 @@ add_executable(pendulum_control
     embedded/filters.c
     embedded/motor_protection.c
     embedded/pwm_simulation.c
-    embedded/virtual_encoder.c
+    unified_virtual_encoder.c
 )
 
 # Include directories

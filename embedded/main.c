@@ -128,10 +128,10 @@ bool repeating_timer_cb(struct repeating_timer *t) {
         angle_unwrapped = -angle_unwrapped;
     }
 
-    // **CORRECTED ANGLE REFERENCES**
-    // Calculate theta_b as angle from bottom: theta_b=0 when hanging down, theta_b=π when upright
+    // Angle references: θ_b measures the angle from the bottom (θ_b = 0 when the pendulum hangs down and θ_b = π when upright).
     float theta_b = wrap_pi(angle_unwrapped - enc.angle_offset_rad);
-    float theta_u = wrap_pi(theta_b - (float)M_PI); // upright = 0
+    // θ_u measures the angle from the upright reference (θ_u = 0 when upright).
+    float theta_u = wrap_pi(theta_b - (float)M_PI);
 
     // 2) Estimate omega with dynamic dt calculation
     static absolute_time_t last_time;
@@ -170,9 +170,9 @@ bool repeating_timer_cb(struct repeating_timer *t) {
     theta_u_prev = theta_u;
 
     // Kalman predict/update
-    // CRITICAL FIX: DO NOT re-initialize the Kalman filter here.
-    // It must only be initialized once at startup.
-    // kalman_init(&KF, dt, a, b, 1e-4f, 5e-3f, 3e-3f); // <-- DELETE OR COMMENT OUT THIS LINE
+    // The Kalman filter is initialised once at startup and should not be
+    // reinitialised inside the control loop.  Doing so would reset
+    // its state every iteration and render the filter ineffective.
     
     // Use the previous control command for prediction (S.u from last iteration)
     kalman_predict(&KF, S.u);
@@ -205,15 +205,16 @@ bool repeating_timer_cb(struct repeating_timer *t) {
         }
     }
     
-    // FIXED: Motor inversion is now handled inside the energy controller
+    // Motor inversion is handled inside the energy controller
     // This ensures consistent sign convention for energy pumping
     // The control command u already has the correct sign for the motor
     
     // Update the state with the final command for Kalman prediction
     S.u = u;
     
-    // CRITICAL: Always update thermal protection system, even when motor command is zero
-    // This ensures thermal energy can decay when the system is idle
+    // Always update the thermal protection system, even when the motor command
+    // is zero.  Updating on every iteration allows the stored thermal
+    // energy to decay when the system is idle.
     motor_protection_step(&drv.protection, to_ms_since_boot(start));
     
     // Command the motor directly (inversion already applied)
@@ -555,22 +556,23 @@ int main() {
     lpf1_init(&lp_angle, 0.92f, 0.0f);  // Moderate filtering (compromise between PC and ultra-heavy)
     diff_lpf_init(&dtheta, 0.75f); // Moderate filtering on derivative
     
-    // CRITICAL FIX: Initialize the Kalman filter here, ONCE.
+    // Initialise the Kalman filter here once during startup.  Reinitialising
+    // later would reset its state and degrade filtering performance.
     float J = (P.m * P.L * P.L) / 3.0f + P.Jm;
-    // CORRECTED: For a rod pivoted at one end with center of mass at L/2,
-    // linearized around upright (unstable): theta_u'' = -a*theta_u + b*u
-    // where a = (m*g*L/2)/J for the gravity term (NEGATIVE for unstable equilibrium)
-    float a = -(P.m * 9.81f * (P.L / 2.0f)) / J;  // FIXED: Negative sign for inverted pendulum
-    float b = P.u_to_tau / J;  // FIXED: Incorporate MOTOR_INVERT into u_to_tau instead
+    // For a rod pivoted at one end with its centre of mass at L/2, linearised about the upright equilibrium:
+    //   θ_u'' = -a * θ_u + b * u.
+    // Here a = (m * g * L / 2) / J is negative for the inverted pendulum and b is the torque conversion gain.
+    float a = -(P.m * 9.81f * (P.L / 2.0f)) / J;  // Negative sign accounts for the inverted pendulum
+    float b = P.u_to_tau / J;  // MOTOR_INVERT is incorporated into u_to_tau
     
     // If MOTOR_INVERT is true, adjust the sign of b so Kalman sees the correct torque
     if (MOTOR_INVERT) {
         b = -b;
     }
     
-    // ULTRA-AGGRESSIVE Kalman filtering for high-precision balance control on embedded hardware
-    // Microcontroller environment requires much heavier filtering due to sensor noise and discrete effects
-    kalman_init(&KF, P.dt, a, b, 1e-5f, 5e-4f, 2e-4f);  // Industry-grade servo filtering for embedded systems
+    // Configure the Kalman filter with parameters tuned for embedded hardware.
+    // Higher noise covariance values provide robust state estimation in the presence of sensor noise.
+    kalman_init(&KF, P.dt, a, b, 1e-5f, 5e-4f, 2e-4f);
     
     // Skip calibration if no encoder, but still set up control
     if (enc_found) {
@@ -579,7 +581,7 @@ int main() {
             printf("Please position pendulum at bottom (hanging down) and hold steady...\n");
         }
         
-        // ROBUST CALIBRATION: Use sine/cosine averaging to handle wrap-around angles
+        // Calibration uses sine and cosine averaging to compute the circular mean and handle angle wrap-around.
         float sum_sin = 0.0f;
         float sum_cos = 0.0f;
         int cal_count = 0;
@@ -593,7 +595,7 @@ int main() {
             float angle_raw;
             // SAFETY: Don't hang if encoder fails - skip this reading
             if (as5600_read_angle_rad(&enc, &angle_raw)) {
-                // Apply sensor inversion if configured (FIXED: honor SENSOR_INVERT)
+                // Apply sensor inversion if the configuration enables SENSOR_INVERT
                 if (SENSOR_INVERT) {
                     angle_raw = -angle_raw;
                 }
@@ -640,7 +642,7 @@ int main() {
                 if (debug_is_output_enabled()) {
                     printf("Calibration test: raw=%.3f, offset=%.3f, theta_b=%.3f\n", 
                            test_angle_raw, enc.angle_offset_rad, theta_b_test);
-                    printf("ROBUST CALIBRATION: No π correction needed - offset points to hanging position\n");
+                    printf("Calibration: no π correction needed - offset corresponds to the hanging position\n");
                 }
             }
             

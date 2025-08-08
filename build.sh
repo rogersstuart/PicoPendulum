@@ -1,5 +1,10 @@
 #!/bin/bash
-# Build script for Pendulum Simulator
+# Legacy build script for the pendulum simulator.
+#
+# This script previously handled building the SDL/ImGui version of the
+# simulator.  The project now uses a Qt‑based GUI and is built with
+# CMake.  This script is retained for reference and may not be
+# required for normal use.
 
 echo "=== Pendulum Control Simulator Build Script ==="
 

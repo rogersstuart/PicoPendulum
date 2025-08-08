@@ -138,9 +138,11 @@ void drv8833_cmd(drv8833_t *m, float u) {
     m->current_command = u;
     
 #if IS_PICO_BUILD
-    // Real hardware - integration-based protection
-    // CRITICAL FIX: Use real timestamp for proper thermal integration
-    // This must match the timestamp system used in main.c motor_protection_step()
+    // Real hardware – integration-based protection.  Use the current
+    // timestamp for proper thermal integration so that the motor
+    // protection can correctly accumulate energy over time.  The
+    // timestamp source must match the system used in main.c
+    // motor_protection_step().
     uint32_t current_timestamp_ms = to_ms_since_boot(get_absolute_time());
     
     // Use stored motor speed if available, otherwise assume zero for Pico build
@@ -172,9 +174,10 @@ void drv8833_cmd(drv8833_t *m, float u) {
     }
     
 #else
-    // PC simulation - generate real PWM waveform and sample it
-    // SYNCHRONIZATION FIX: Use shared time counter accessible from both cmd and step functions
-    // Store raw command for protection sampling (timing will be handled in step_simulation)
+    // PC simulation – generate a real PWM waveform and sample it.  Use
+    // a shared time counter accessible from both the command and step
+    // functions to ensure proper synchronisation.  The raw command is
+    // stored here and the actual timing is handled in step_simulation().
     
     // Set PWM generator mode and command (PROTECTION APPLIED IN STEP_SIMULATION)
     switch (m->control_mode) {

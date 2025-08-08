@@ -14,93 +14,66 @@ A PC application that wraps your embedded pendulum control code with a realistic
 
 ## Prerequisites
 
-### Linux (Ubuntu/Debian)
+This project depends on a C++ compiler, CMake, and the Qt widget and OpenGL
+libraries.  On most Linux distributions you can install the required
+dependencies with your package manager.  For example, on Debian/Ubuntu:
+
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential cmake libsdl2-dev libgl1-mesa-dev python3 git
+sudo apt-get install -y build-essential cmake qtbase5-dev libqt5opengl5-dev python3 git
 ```
 
-### Linux (Fedora/RHEL)
+On Fedora/RHEL:
+
 ```bash
-sudo dnf install -y cmake gcc-c++ SDL2-devel mesa-libGL-devel python3 git
+sudo dnf install -y cmake gcc-c++ qt5-qtbase-devel qt5-qtopengl-devel python3 git
 ```
 
-### macOS
+On macOS, install Qt using Homebrew:
+
 ```bash
-# Install Homebrew first: https://brew.sh
-brew install cmake sdl2 python3 git
+brew install cmake qt python3 git
 ```
 
-### Windows
-1. Install Visual Studio 2019 or later with C++ support
-2. Install CMake
-3. Install vcpkg package manager
-4. Run: `vcpkg install sdl2 opengl`
+On Windows, use the official Qt installer or vcpkg to install Qt 5 or 6 along
+with CMake and a C++ toolchain.
 
 ## Quick Start
 
-### Method 1: Using the Build Script (Recommended)
+To build and run the simulator using CMake:
+
 ```bash
-# Clone and setup
+# Clone and set up the repository
 git clone <your-repo-url>
 cd pendulum-simulator
 
-# Make build script executable
-chmod +x build.sh
+# Create a build directory and configure the project
+mkdir build && cd build
+cmake .. -DBUILD_QT_GUI=ON
 
-# Install dependencies
-./build.sh deps
-
-# Setup external libraries and build
-./build.sh setup
-./build.sh build
+# Build the simulator
+cmake --build . --config Release
 
 # Run the simulator
-./build.sh run
-```
-
-### Method 2: Using CMake
-```bash
-# Setup external dependencies
-mkdir external && cd external
-git clone https://github.com/ocornut/imgui.git
-git clone https://github.com/skaslev/gl3w.git
-cd gl3w && python3 gl3w_gen.py && cd ../..
-
-# Build
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
-
-# Run
 ./PendulumSimulator
 ```
 
-### Method 3: Using Makefile
-```bash
-# Install dependencies (Ubuntu)
-make deps-ubuntu
-
-# Build and run
-make run
-```
+The provided build script and Makefile have been retained for convenience but are
+no longer required for normal usage since the default build system is CMake.
 
 ## Project Structure
 
 ```
 pendulum-simulator/
-├── pendulum_simulator.cpp     # Main PC application
-├── CMakeLists.txt             # CMake build system
-├── Makefile                   # Alternative build system
-├── build.sh                   # Build script
-├── embedded/                  # Modified embedded headers
-│   ├── control.h             # Control system header
-│   ├── drv8833.h             # Motor driver header (mocked)
-│   └── filters.h             # Filters and Kalman filter
-├── external/                  # External dependencies (auto-downloaded)
-│   ├── imgui/                # Dear ImGui library
-│   └── gl3w/                 # OpenGL loader
-└── build/                    # Build artifacts
+├── qt_gui/                  # Qt user interface implementation
+├── adaptive_mass/           # Adaptive mass and friction estimators
+├── common/                 # Shared utilities and energy control
+├── embedded/               # Control system and motor driver headers
+├── unified_virtual_encoder.c/hpp # Virtual encoder implementation
+├── enhanced_physics_simulation.cpp/hpp # Physics model used by the simulator
+├── CMakeLists.txt           # Build system configuration
+├── build.sh                 # Legacy build script (optional)
+└── build/                   # Build artifacts (generated)
 ```
 
 ## Usage
@@ -186,9 +159,8 @@ Where:
 ## Troubleshooting
 
 ### Build Issues
-- **Missing SDL2**: Install development packages (`libsdl2-dev` on Ubuntu)
-- **OpenGL errors**: Install Mesa development packages
-- **Python3 not found**: Install Python 3 for GL3W generation
+- **Missing Qt**: Install the Qt development packages for your platform (e.g. `qtbase5-dev` and `libqt5opengl5-dev` on Ubuntu)
+- **Python3 not found**: Python 3 is only required for auxiliary scripts; install it if your distribution does not provide it
 
 ### Runtime Issues
 - **Blank window**: Check OpenGL drivers are installed
@@ -244,6 +216,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Acknowledgments
 
-- **Dear ImGui**: Excellent immediate mode GUI library
-- **SDL2**: Cross-platform windowing and input
+- **Qt**: A mature cross-platform GUI framework used for the new
+  retained-mode interface
 - **Your embedded code**: The excellent control algorithms being simulated!

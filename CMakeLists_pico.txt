@@ -18,11 +18,16 @@ add_executable(pendulum_control
     embedded/filters.c
     embedded/motor_protection.c
     embedded/pwm_simulation.c
-    embedded/virtual_encoder.c
+    unified_virtual_encoder.c
+    adaptive_mass/mass_friction_estimator.c
+    adaptive_mass/mass_integration.c
+    common/energy_control.c
 )
 
 # Include directories
 target_include_directories(pendulum_control PRIVATE embedded/)
+target_include_directories(pendulum_control PRIVATE adaptive_mass/)
+target_include_directories(pendulum_control PRIVATE common/)
 
 # Link Pico libraries
 target_link_libraries(pendulum_control 

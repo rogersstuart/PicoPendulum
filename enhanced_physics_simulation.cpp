@@ -1,4 +1,4 @@
-// Enhanced Physics Simulation Implementation - FIXED
+// Enhanced physics simulation implementation
 // File: enhanced_physics_simulation.cpp
 
 #ifdef PC_DEBUG
@@ -10,7 +10,7 @@
 #include <cstring>
 
 // ============================================================================
-// ENHANCED MOTOR MODEL IMPLEMENTATION - FIXED
+// Enhanced motor model implementation
 // ============================================================================
 
 EnhancedMotorModel::EnhancedMotorModel() {
@@ -174,7 +174,7 @@ float EnhancedMotorModel::updateMotor(float voltage_cmd, float load_torque, floa
 }
 
 // ============================================================================
-// LUGRE FRICTION MODEL IMPLEMENTATION - FIXED
+// LuGre friction model implementation
 // ============================================================================
 
 LuGreFrictionModel::LuGreFrictionModel() {
@@ -243,7 +243,7 @@ float LuGreFrictionModel::getSimpleFriction(float velocity, float coulomb, float
 }
 
 // ============================================================================
-// SENSOR EFFECTS MODEL IMPLEMENTATION - FIXED
+// Sensor effects model implementation
 // ============================================================================
 
 SensorEffectsModel::SensorEffectsModel() 
@@ -309,15 +309,15 @@ void SensorEffectsModel::reset() {
 }
 
 // ============================================================================
-// ENHANCED PENDULUM PHYSICS IMPLEMENTATION - FIXED
+// Enhanced pendulum physics implementation
 // ============================================================================
 
 EnhancedPendulumPhysics::EnhancedPendulumPhysics() 
-    : theta_(M_PI), omega_(0), mass_(0.2f), length_(0.3048f), 
+    : theta_(M_PI), omega_(0), mass_(0.05f), length_(0.3048f), 
       gravity_(9.81f), dt_(0.001f), integration_method_(RK2),
       applied_torque_(0.0f), applied_voltage_(0.0f), validation_error_(0.0f) {
     
-    // FIX: Initialize all smart pointers properly
+    // Initialise all smart pointers properly
     motor_ = std::make_unique<EnhancedMotorModel>();
     friction_ = std::make_unique<LuGreFrictionModel>();
     sensor_ = std::make_unique<SensorEffectsModel>();
@@ -370,33 +370,29 @@ std::pair<float, float> EnhancedPendulumPhysics::calculateDynamics(float theta, 
     if (I <= 0.0f) I = 1e-6f;
     
     // SIMPLIFIED: Just basic pendulum dynamics with motor torque
-    // Gravitational torque - correct coordinate system
+    // Gravitational torque for theta_u coordinate system
+    // theta_u = 0 is upright, theta_u = ±π is hanging down
+    // Gravity should provide restoring torque toward hanging position (theta_u = π)
     float sin_theta = std::sin(theta);
     if (!std::isfinite(sin_theta)) sin_theta = 0.0f;
     
-    float gravity_torque = -mass_ * gravity_ * (length_ / 2.0f) * sin_theta;
+    // Positive gravity torque for the theta_u coordinate system.  The model
+    // matches the control system’s convention where gravity tends to
+    // return the pendulum to the hanging position.
+    float gravity_torque = mass_ * gravity_ * (length_ / 2.0f) * sin_theta;
     
     // Simplified friction (realistic viscous damping for energy dissipation)
     float friction_torque = -0.005f * omega;  // Increased friction for proper energy decay
     
-    // Simple motor model: voltage directly to torque with basic scaling
-    float motor_torque = applied_voltage_ * 0.01f;  // 0.01 Nm per Volt
+    // Realistic motor model: voltage to torque with proper scaling
+    // Typical 140-class hobby motor: 0.01-0.05 Nm per Volt is realistic for hobby applications
+    float motor_torque = applied_voltage_ * 0.05f;  // 0.05 Nm per Volt - realistic for 140-class hobby motor
     
     // Total torque
     float total_torque = gravity_torque + friction_torque + motor_torque;
     
-    // Bounds checking on total torque
-    if (!std::isfinite(total_torque) || std::abs(total_torque) > 10.0f) {
-        total_torque = 0.0f;
-    }
-    
     // Angular acceleration
     float alpha = total_torque / I;
-    
-    // Bounds checking on acceleration
-    if (!std::isfinite(alpha) || std::abs(alpha) > 1000.0f) {
-        alpha = 0.0f;
-    }
     
     return std::make_pair(omega, alpha);  // [dtheta/dt, domega/dt]
 }
@@ -416,25 +412,13 @@ void EnhancedPendulumPhysics::step() {
         return;
     }
     
-    // Clamp extreme values
-    if (std::abs(omega_) > 100.0f) {
-        omega_ = (omega_ > 0) ? 100.0f : -100.0f;
-    }
-    
     // Use simple Euler integration for debugging
     auto [dtheta, domega] = calculateDynamics(theta_, omega_);
     
-    // Bounds check derivatives
+    // Only check for non-finite values - no artificial limits
     if (!std::isfinite(dtheta) || !std::isfinite(domega)) {
         if (debug_counter % 1000 == 0) {
             std::cout << "Physics: non-finite derivatives" << std::endl;
-        }
-        return;
-    }
-    
-    if (std::abs(dtheta) > 100.0f || std::abs(domega) > 1000.0f) {
-        if (debug_counter % 1000 == 0) {
-            std::cout << "Physics: extreme derivatives" << std::endl;
         }
         return;
     }
@@ -445,10 +429,23 @@ void EnhancedPendulumPhysics::step() {
     
     // Debug output
     if (debug_counter % 1000 == 0) {
+        // Add detailed torque breakdown
+        auto [test_dtheta, test_domega] = calculateDynamics(theta_, omega_);
+        float I = mass_ * length_ * length_ / 3.0f;
+        float gravity_torque = mass_ * gravity_ * (length_ / 2.0f) * std::sin(theta_);
+        float friction_torque = -0.005f * omega_;
+        float motor_torque = applied_voltage_ * 0.05f;
+        float total_torque = gravity_torque + friction_torque + motor_torque;
+        
         std::cout << "Physics step " << debug_counter << ": theta=" << theta_ 
-                  << ", omega=" << omega_ << ", dtheta=" << dtheta 
-                  << ", domega=" << domega << ", dt=" << dt_ 
+                  << ", omega=" << omega_ << ", dtheta=" << test_dtheta 
+                  << ", domega=" << test_domega << ", dt=" << dt_ 
                   << ", voltage=" << applied_voltage_ << std::endl;
+        std::cout << "  Torques: gravity=" << gravity_torque << ", friction=" << friction_torque 
+                  << ", motor=" << motor_torque << ", total=" << total_torque 
+                  << ", I=" << I << std::endl;
+        std::cout << "  Parameters: mass=" << mass_ << ", length=" << length_ 
+                  << ", gravity=" << gravity_ << std::endl;
     }
     
     // Final bounds checking
@@ -462,7 +459,7 @@ void EnhancedPendulumPhysics::step() {
     while (theta_ <= -M_PI) theta_ += 2 * M_PI;
 }
 
-// FIX: Implement the missing accessor methods with simplified sensor effects
+// Implement accessor methods with simplified sensor effects
 float EnhancedPendulumPhysics::getTheta() const { 
     return theta_; // Return true angle for now - no sensor noise for debugging
 }
@@ -501,7 +498,7 @@ void EnhancedPendulumPhysics::resetToBottom() {
 
 float EnhancedPendulumPhysics::getEnergy() const {
     float I = mass_ * length_ * length_ / 3.0f;
-    // FIX: Energy calculation with correct coordinate system
+// Energy calculation using the correct coordinate system
     return 0.5f * I * omega_ * omega_ + mass_ * gravity_ * (length_ / 2.0f) * (1.0f + std::cos(theta_));
 }
 
@@ -514,7 +511,7 @@ void EnhancedPendulumPhysics::setTemperature(float temp_celsius) {
     std::cout << "System temperature set to " << temp_celsius << "°C" << std::endl;
 }
 
-// FIX: Implement all the missing diagnostic methods
+// Implement all missing diagnostic methods
 void EnhancedPendulumPhysics::printDiagnostics() const {
     std::cout << "\n=== Enhanced Physics Diagnostics ===" << std::endl;
     std::cout << "Integration Method: " << getIntegrationMethodName() << std::endl;
@@ -561,7 +558,7 @@ const char* EnhancedPendulumPhysics::getIntegrationMethodName() const {
 // as inline functions in the header file to avoid redefinition errors
 
 // ============================================================================
-// PHYSICS VALIDATOR IMPLEMENTATION - FIXED
+// Physics validator implementation
 // ============================================================================
 
 void PhysicsValidator::addReferencePoint(float angle, float velocity) {
@@ -666,7 +663,7 @@ void PhysicsValidator::clear() {
 }
 
 // ============================================================================
-// PERFORMANCE METRICS IMPLEMENTATION - FIXED
+// Performance metrics implementation
 // ============================================================================
 
 bool PerformanceMetrics::meetsIndustrialTargets() const {
@@ -754,14 +751,14 @@ PerformanceMetrics calculatePerformanceMetrics(
 }
 
 // ============================================================================
-// FACTORY FUNCTIONS IMPLEMENTATION - FIXED
+// Factory functions implementation
 // ============================================================================
 
 std::unique_ptr<EnhancedPendulumPhysics> createIndustrialGradePhysics() {
     auto physics = std::make_unique<EnhancedPendulumPhysics>();
     
-    // Industrial-grade parameters
-    physics->setParameters(0.2f, 0.3048f, 0.001f, 0.001f);  // 20cm pendulum
+    // Industrial-grade parameters - matches actual hardware
+    physics->setParameters(0.05f, 0.3048f, 0.001f, 0.001f);  // 50g, 12 inch pendulum
     physics->setIntegrationMethod(EnhancedPendulumPhysics::RK2);  // Optimal choice
     physics->setTimestep(0.001f);  // 1kHz sampling
     physics->setNoise(0.001f, 0.0001f);  // Low noise for precision
@@ -774,8 +771,8 @@ std::unique_ptr<EnhancedPendulumPhysics> createIndustrialGradePhysics() {
 std::unique_ptr<EnhancedPendulumPhysics> createResearchValidationPhysics() {
     auto physics = std::make_unique<EnhancedPendulumPhysics>();
     
-    // Research validation parameters
-    physics->setParameters(0.2f, 0.3048f, 0.001f, 0.001f);
+    // Research validation parameters - matches actual hardware
+    physics->setParameters(0.05f, 0.3048f, 0.001f, 0.001f);  // 50g, 12 inch pendulum
     physics->setIntegrationMethod(EnhancedPendulumPhysics::RK4);  // Maximum accuracy
     physics->setTimestep(0.0001f);  // 10kHz for validation
     physics->setNoise(0.0001f, 0.00001f);  // Very low noise
@@ -788,8 +785,8 @@ std::unique_ptr<EnhancedPendulumPhysics> createResearchValidationPhysics() {
 std::unique_ptr<EnhancedPendulumPhysics> createSimplifiedPhysics() {
     auto physics = std::make_unique<EnhancedPendulumPhysics>();
     
-    // Simplified parameters for comparison
-    physics->setParameters(0.2f, 0.3048f, 0.0f, 0.0f);  // No friction
+    // Simplified parameters for comparison - matches actual hardware
+    physics->setParameters(0.05f, 0.3048f, 0.0f, 0.0f);  // 50g, 12 inch, no friction
     physics->setIntegrationMethod(EnhancedPendulumPhysics::MODIFIED_EULER);
     physics->setTimestep(0.01f);  // 100Hz sampling
     physics->setNoise(0.0f, 0.0f);  // No noise

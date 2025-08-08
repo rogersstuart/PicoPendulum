@@ -1,10 +1,13 @@
-# Makefile for Pendulum Simulator
-# Alternative to CMake for simpler builds
+# Makefile for the legacy SDL/OpenGL pendulum simulator.
+# This file is retained for backwards compatibility only.  The current
+# version of the simulator uses a Qt‑based interface and is built via
+# CMake.  Use this Makefile only if you need to build the old SDL/OpenGL
+# version.
 
 # Compiler settings
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -DPC_SIMULATION
-INCLUDES = -Iexternal/imgui -Iexternal/imgui/backends -Iexternal/gl3w/include -Iembedded
+INCLUDES = -Iexternal/imgui -Iexternal/imgui/backends -Iexternal/gl3w/include -Iembedded -Iadaptive_mass -Icommon
 LIBS = -lSDL2 -lGL -ldl -lpthread
 
 # Platform detection
@@ -32,7 +35,9 @@ IMGUI_SOURCES = $(EXTERNAL_DIR)/imgui/imgui.cpp \
 
 GL3W_SOURCES = $(EXTERNAL_DIR)/gl3w/src/gl3w.c
 
-APP_SOURCES = pendulum_simulator.cpp
+APP_SOURCES = pendulum_simulator.cpp unified_virtual_encoder.c \
+              adaptive_mass/mass_friction_estimator.c adaptive_mass/mass_integration.c \
+              common/energy_control.c
 
 ALL_SOURCES = $(APP_SOURCES) $(IMGUI_SOURCES) $(GL3W_SOURCES)
 

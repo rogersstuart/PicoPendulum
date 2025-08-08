@@ -1,7 +1,0 @@
-/mnt/c/Users/stuart/Downloads/new_pendulum_app/build/CMakeFiles/PendulumSimulator.dir
-/mnt/c/Users/stuart/Downloads/new_pendulum_app/build/CMakeFiles/edit_cache.dir
-/mnt/c/Users/stuart/Downloads/new_pendulum_app/build/CMakeFiles/rebuild_cache.dir
-/mnt/c/Users/stuart/Downloads/new_pendulum_app/build/CMakeFiles/list_install_components.dir
-/mnt/c/Users/stuart/Downloads/new_pendulum_app/build/CMakeFiles/install.dir
-/mnt/c/Users/stuart/Downloads/new_pendulum_app/build/CMakeFiles/install/local.dir
-/mnt/c/Users/stuart/Downloads/new_pendulum_app/build/CMakeFiles/install/strip.dir
